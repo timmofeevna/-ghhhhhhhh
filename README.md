@@ -13,70 +13,54 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import uvicorn
 
-# --- Инициализация приложения ---
 app = FastAPI(title="Временной Хаб", description="Ловушка для остановленного времени")
 
-# Создаем директории для статики и шаблонов, если их нет
 os.makedirs("static", exist_ok=True)
 os.makedirs("templates", exist_ok=True)
-os.makedirs("user_data", exist_ok=True)  # для хранения схемы квартиры и "обучения"
+os.makedirs("user_data", exist_ok=True)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# --- Глобальные состояния (имитация сессии и ИИ) ---
-# В реальном проекте это хранилось бы в Redis/БД, но для атмосферы оставим в памяти
 user_behaviour = {
     "visits": [],
     "last_commutation": None,
     "rain_mode": False
 }
 
-# Схема квартиры (по умолчанию, потом пользователь загружает свою)
 apartment_map = {
     "walls": [(0, 0), (10, 0), (10, 10), (0, 10)],
-    "obstacles": [(2, 2), (7, 7)],
-    "vacuum_pos": [5.0, 5.0]
+    "obstacles": [(2, 2), (7, 7), (4, 8)],
+    "vacuum_pos": [5.0, 5.0],
+    "vacuum_angle": 0
 }
 
-# --- Вспомогательные функции ---
 async def get_weather_rain_status():
-    """Проверяет, идет ли дождь по API (имитация или реальный запрос)"""
-    # Для реализма используем бесплатный API wttr.in или имитацию
     try:
         async with aiohttp.ClientSession() as session:
-            # Запрос к wttr.in в формате JSON для Amsterdam (можно заменить на город пользователя)
-            async with session.get("https://wttr.in/Amsterdam?format=j1") as resp:
+            async with session.get("https://wttr.in/Moscow?format=j1") as resp:
                 data = await resp.json()
                 current_condition = data.get("current_condition", [{}])[0]
                 weather_desc = current_condition.get("weatherDesc", [{}])[0].get("value", "").lower()
-                is_raining = "rain" in weather_desc or "drizzle" in weather_desc
+                is_raining = "rain" in weather_desc or "drizzle" in weather_desc or "shower" in weather_desc
                 return is_raining
     except:
-        # Если API недоступно, используем случайное состояние с 30% вероятностью дождя
-        # Или можно просто вернуть False, но для вайба лучше рандом
         return random.random() < 0.3
 
-# --- Эндпоинты ---
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    """Главная страница: экзамен?"""
     return templates.TemplateResponse("exam_check.html", {"request": request})
 
 @app.post("/enter")
 async def enter_site(data: dict):
-    """Обработка выбора 'ещё нет' или 'забыл'"""
     choice = data.get("choice")
     if choice not in ["ещё нет", "забыл"]:
         raise HTTPException(status_code=400, detail="Неверный выбор")
-    # Записываем время входа для "ИИ-обучения"
     user_behaviour["visits"].append(datetime.datetime.now().isoformat())
     return {"status": "ok", "redirect": "/hub"}
 
 @app.get("/hub", response_class=HTMLResponse)
 async def hub(request: Request):
-    """Главный интерфейс - ловушка времени"""
-    # Проверяем погоду для цветовой схемы
     is_raining = await get_weather_rain_status()
     user_behaviour["rain_mode"] = is_raining
     
@@ -87,43 +71,48 @@ async def hub(request: Request):
 
 @app.get("/api/timer")
 async def get_timer():
-    """Возвращает случайное время для таймера (2-47 минут) в секундах"""
     minutes = random.randint(2, 47)
     return {"seconds": minutes * 60, "minutes": minutes}
 
 @app.get("/api/vacuum_stream")
 async def vacuum_stream():
-    """Генерирует поток данных о положении пылесоса для радара"""
     async def generate():
         while True:
-            # Хаотичное движение по схеме квартиры
             x, y = apartment_map["vacuum_pos"]
-            # Добавляем случайное смещение + отскок от стен (упрощенно)
-            dx = random.uniform(-0.5, 0.5)
-            dy = random.uniform(-0.5, 0.5)
-            new_x = max(0.5, min(9.5, x + dx))
-            new_y = max(0.5, min(9.5, y + dy))
+            angle = apartment_map["vacuum_angle"]
+            
+            # Хаотичное движение с поворотами
+            move_choice = random.random()
+            if move_choice < 0.7:
+                dx = random.uniform(-0.4, 0.4)
+                dy = random.uniform(-0.4, 0.4)
+                new_x = max(0.3, min(9.7, x + dx))
+                new_y = max(0.3, min(9.7, y + dy))
+                angle += random.uniform(-0.3, 0.3)
+            else:
+                new_x, new_y = x, y
+                angle += random.uniform(-0.8, 0.8)
+            
             apartment_map["vacuum_pos"] = [new_x, new_y]
+            apartment_map["vacuum_angle"] = angle % 360
             
             data = {
                 "x": new_x,
                 "y": new_y,
+                "angle": angle,
                 "walls": apartment_map["walls"],
                 "obstacles": apartment_map["obstacles"]
             }
             yield f"data: {json.dumps(data)}\n\n"
-            await asyncio.sleep(random.uniform(0.8, 2.2))  # случайная задержка как в реальном пылесосе
+            await asyncio.sleep(random.uniform(1.0, 2.5))
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 @app.post("/api/upload_apartment")
 async def upload_apartment(data: dict):
-    """Пользователь загружает схему своей квартиры (один раз при настройке)"""
     global apartment_map
-    # Ожидаем walls: list of points, obstacles: list of points
     if "walls" in data and "obstacles" in data:
         apartment_map["walls"] = data["walls"]
         apartment_map["obstacles"] = data["obstacles"]
-        # Сохраняем в файл
         with open("user_data/apartment_map.json", "w") as f:
             json.dump(apartment_map, f)
         return {"status": "ok", "message": "Схема квартиры загружена"}
@@ -132,44 +121,39 @@ async def upload_apartment(data: dict):
 
 @app.post("/api/commutate")
 async def commutate(request: Request):
-    """ИИ-коммутатор 4x4. Принимает данные о том, какой канал выбран"""
     data = await request.json()
-    # Логируем для "обучения"
     user_behaviour["last_commutation"] = {
         "time": datetime.datetime.now().isoformat(),
         "inputs": data.get("inputs", [])
     }
-    # Сохраняем историю для "обучения"
     with open("user_data/commutations.json", "a") as f:
         f.write(json.dumps(user_behaviour["last_commutation"]) + "\n")
     
-    # "Результат отправлен мне" - просто возвращаем сообщение
-    return {"message": "Результат отправлен мне. Спасибо за участие в сессии."}
+    return {"message": "⚡ РЕЗУЛЬТАТ ОТПРАВЛЕН МНЕ ⚡\nСпасибо за участие в сессии."}
 
 @app.get("/api/logs")
 async def get_logs():
-    """Технический блог в виде логов stdout"""
     logs = [
-        f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] дождь: {'да, вайб' if user_behaviour['rain_mode'] else 'нет, сухо'}",
-        f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] пылесос: врезался в стену, продолжает",
-        f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] экзамен: не начался, время удерживается",
-        f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] посетитель: активен, коммутаций: {len(user_behaviour.get('commutations_history', []))}",
+        f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 🌧️ дождь: {'ДА, ВАЙБ АКТИВЕН' if user_behaviour['rain_mode'] else 'СУХО, ОЖИДАНИЕ'}",
+        f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 🌀 пылесос: маршрут скорректирован, столкновений: {random.randint(0, 3)}",
+        f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 📡 экзамен: НЕ НАЧАЛСЯ, время удерживается",
+        f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 👤 сессий сегодня: {len([v for v in user_behaviour['visits'] if datetime.datetime.fromisoformat(v).date() == datetime.date.today()])}",
     ]
     return logs
 
 @app.get("/api/random_avatar")
 async def random_avatar():
-    """Генерирует случайный аватар на основе ников из Telegram (имитация)"""
-    # В реальности тут был бы парсинг чатов, но для атмосферы - случайные имена
-    fake_names = ["Кот_Питон", "Мрачный_Технарь", "Алкаш_из_5ки", "Сосед_Сверху", "Нейросеть", "Хаос", "Дождь"]
-    return {"avatar": f"https://api.dicebear.com/7.x/identicon/svg?seed={random.choice(fake_names)}", "name": random.choice(fake_names)}
+    fake_names = [
+        "Толик_228", "Саня_без_дома", "Серый_22", "Колян_85", 
+        "Батя_с_палкой", "Рыжий_кот", "Сосед_Гена", "Мамкин_алкаш",
+        "Дворник_Петрович", "Бомж_Аркадий", "Шурик_с_пивом"
+    ]
+    return {"avatar": f"https://api.dicebear.com/7.x/pixel-art/svg?seed={random.choice(fake_names)}", "name": random.choice(fake_names)}
 
-# --- Шаблоны (встроенные строки для удобства, но можно вынести в файлы) ---
-# Создадим файлы шаблонов, если их нет
+# Создаём шаблоны
 def create_templates():
     os.makedirs("templates", exist_ok=True)
     
-    # Шаблон exam_check.html
     with open("templates/exam_check.html", "w", encoding="utf-8") as f:
         f.write("""
 <!DOCTYPE html>
@@ -177,67 +161,182 @@ def create_templates():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Вход в хаб | Остановка времени</title>
+    <title>ТЕРМИНАЛ ДОСТУПА</title>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
         body {
-            background: #0a0f1a;
-            color: #a0b0c0;
-            font-family: 'Courier New', monospace;
+            min-height: 100vh;
+            background: radial-gradient(ellipse at center, #0a0a0a 0%, #000000 100%);
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
-            margin: 0;
+            font-family: 'Courier New', 'Fira Code', monospace;
+            position: relative;
+            overflow: hidden;
         }
+        
+        /* CRT эффект */
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 255, 0, 0.03) 0px,
+                rgba(0, 255, 0, 0.03) 2px,
+                transparent 2px,
+                transparent 4px
+            );
+            pointer-events: none;
+            z-index: 1;
+        }
+        
+        body::after {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, transparent 50%, rgba(0,0,0,0.5) 100%);
+            pointer-events: none;
+            z-index: 1;
+        }
+        
         .container {
-            background: #141a24;
-            padding: 2rem;
-            border-radius: 8px;
-            border: 1px solid #2a3a4a;
+            position: relative;
+            z-index: 2;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(8px);
+            border: 2px solid #00ff00;
+            box-shadow: 0 0 30px rgba(0, 255, 0, 0.3), inset 0 0 20px rgba(0, 255, 0, 0.1);
+            padding: 3rem 4rem;
             text-align: center;
-            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            animation: glitch 0.3s infinite;
         }
+        
+        @keyframes glitch {
+            0%, 100% { transform: skew(0deg, 0deg); opacity: 1; }
+            95% { transform: skew(0.5deg, 0.2deg); opacity: 0.95; }
+            96% { transform: skew(-0.3deg, -0.1deg); }
+        }
+        
         h1 {
-            font-size: 1.5rem;
+            color: #00ff00;
+            font-size: 2rem;
+            letter-spacing: 4px;
+            text-shadow: 0 0 10px #00ff00, 0 0 20px #00ff00;
             margin-bottom: 2rem;
             font-weight: normal;
-            letter-spacing: 2px;
+            border-right: 2px solid #00ff00;
+            display: inline-block;
+            padding-right: 1rem;
+            animation: blink 1s step-end infinite;
         }
+        
+        @keyframes blink {
+            0%, 100% { border-color: #00ff00; }
+            50% { border-color: transparent; }
+        }
+        
         .buttons {
             display: flex;
-            gap: 20px;
+            gap: 30px;
             justify-content: center;
+            margin: 2rem 0;
         }
+        
         button {
-            background: #1e2a32;
-            border: 1px solid #3a5a6a;
-            color: #c0d0e0;
-            padding: 10px 20px;
-            font-family: inherit;
-            font-size: 1rem;
+            background: transparent;
+            border: 2px solid #00ff00;
+            color: #00ff00;
+            padding: 12px 28px;
+            font-family: monospace;
+            font-size: 1.2rem;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+            text-transform: uppercase;
+            letter-spacing: 2px;
         }
+        
+        button::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0, 255, 0, 0.3), transparent);
+            transition: left 0.5s;
+        }
+        
+        button:hover::before {
+            left: 100%;
+        }
+        
         button:hover {
-            background: #2a3a44;
-            border-color: #6a8a9a;
-            color: white;
+            background: rgba(0, 255, 0, 0.1);
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+            transform: scale(1.05);
         }
+        
         .footnote {
-            margin-top: 2rem;
+            color: #00aa00;
             font-size: 0.7rem;
             opacity: 0.6;
+            margin-top: 2rem;
+            letter-spacing: 1px;
+        }
+        
+        .scanline {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(
+                to bottom,
+                transparent 50%,
+                rgba(0, 255, 0, 0.03) 50%
+            );
+            background-size: 100% 4px;
+            pointer-events: none;
+            animation: scan 8s linear infinite;
+            z-index: 3;
+        }
+        
+        @keyframes scan {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100%); }
+        }
+        
+        @media (max-width: 600px) {
+            .container { padding: 2rem; margin: 1rem; }
+            h1 { font-size: 1.3rem; }
+            button { padding: 8px 20px; font-size: 1rem; }
+            .buttons { gap: 15px; }
         }
     </style>
 </head>
 <body>
+    <div class="scanline"></div>
     <div class="container">
-        <h1>Экзамен сдан?</h1>
+        <h1>> ЭКЗАМЕН СДАН?</h1>
         <div class="buttons">
-            <button onclick="select('ещё нет')">ещё нет</button>
-            <button onclick="select('забыл')">забыл</button>
+            <button onclick="select('ещё нет')">[ ещё нет ]</button>
+            <button onclick="select('забыл')">[ забыл ]</button>
         </div>
-        <div class="footnote">выбор необратим</div>
+        <div class="footnote">* выбор необратим. время будет остановлено.</div>
     </div>
     <script>
         async function select(choice) {
@@ -253,325 +352,531 @@ def create_templates():
 </html>
         """)
     
-    # Шаблон hub.html (основной интерфейс)
     with open("templates/hub.html", "w", encoding="utf-8") as f:
         f.write("""
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Технический хаб | Время остановлено</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>ТЕХНИЧЕСКИЙ ХАБ :: ВРЕМЯ ОСТАНОВЛЕНО</title>
     <style>
         * {
+            margin: 0;
+            padding: 0;
             box-sizing: border-box;
         }
-        body {
-            margin: 0;
-            background: {{ '#1a2a2f' if rain_mode else '#1a1e2a' }};
-            font-family: 'Segoe UI', 'Courier New', monospace;
-            color: #cde3f0;
-            transition: background 0.5s ease;
+        
+        :root {
+            --bg-color: {{ '#0a1a1a' if rain_mode else '#0a0a12' }};
+            --panel-bg: rgba(5, 10, 15, 0.85);
+            --accent: {{ '#2a9e8c' if rain_mode else '#2a7f6e' }};
+            --glow: {{ '#2a9e8c' if rain_mode else '#2a7f6e' }};
+            --text: #b0ffc0;
+            --border: {{ '#2a9e8c' if rain_mode else '#2a7f6e' }};
         }
+        
+        body {
+            background: var(--bg-color);
+            color: var(--text);
+            font-family: 'Courier New', 'Fira Code', monospace;
+            padding: 20px;
+            transition: background 0.8s ease;
+            position: relative;
+            overflow-x: hidden;
+        }
+        
+        /* CRT эффект */
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 255, 100, 0.02) 0px,
+                rgba(0, 255, 100, 0.02) 2px,
+                transparent 2px,
+                transparent 4px
+            );
+            pointer-events: none;
+            z-index: 999;
+        }
+        
+        /* VHS эффект */
+        .vhs {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, 
+                transparent 0%, 
+                rgba(255, 255, 255, 0.02) 50%, 
+                transparent 100%);
+            animation: vhsMove 0.2s linear infinite;
+            pointer-events: none;
+            z-index: 998;
+        }
+        
+        @keyframes vhsMove {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        
         .dashboard {
+            max-width: 1600px;
+            margin: 0 auto;
             display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 20px;
-            padding: 20px;
-            max-width: 1400px;
-            margin: 0 auto;
+            position: relative;
+            z-index: 1;
         }
+        
         .panel {
-            background: rgba(10, 15, 20, 0.8);
-            backdrop-filter: blur(5px);
-            border: 1px solid #2c4c5c;
-            border-radius: 12px;
-            padding: 15px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 18px;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
         }
+        
+        .panel::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            animation: scanHorizontal 3s linear infinite;
+        }
+        
+        @keyframes scanHorizontal {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        
         .panel h2 {
-            margin-top: 0;
-            font-size: 1.2rem;
-            border-bottom: 1px solid #2c5c6c;
+            font-size: 0.85rem;
+            letter-spacing: 2px;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
             display: inline-block;
+            text-transform: uppercase;
+            font-weight: normal;
         }
+        
+        /* Камера */
         .camera-view {
-            background: #00000066;
-            border-radius: 8px;
-            height: 300px;
+            background: #000000aa;
+            border-radius: 2px;
+            height: 320px;
             overflow-y: auto;
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
-            padding: 10px;
+            gap: 12px;
+            padding: 15px;
+            border: 1px solid #2a5a5a;
+            position: relative;
         }
+        
+        .camera-view::-webkit-scrollbar {
+            width: 4px;
+            background: #1a3a3a;
+        }
+        
+        .camera-view::-webkit-scrollbar-thumb {
+            background: var(--accent);
+        }
+        
         .avatar-card {
-            background: #1e2a2e;
-            border-radius: 8px;
+            background: #0a1a1a;
+            border-radius: 2px;
             padding: 8px;
             text-align: center;
-            width: 80px;
+            width: 85px;
+            border: 1px solid #2a6a6a;
+            transition: all 0.2s;
+            cursor: pointer;
         }
+        
+        .avatar-card:hover {
+            transform: scale(1.05);
+            border-color: var(--accent);
+            box-shadow: 0 0 10px rgba(42, 158, 140, 0.5);
+        }
+        
         .avatar-card img {
-            width: 64px;
-            height: 64px;
-            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            image-rendering: pixelated;
         }
-        .radar {
-            background: #0f1219;
-            border-radius: 50%;
-            width: 250px;
-            height: 250px;
-            margin: 20px auto;
+        
+        .avatar-card div {
+            font-size: 0.7rem;
+            margin-top: 5px;
+            color: #8ac8b0;
+        }
+        
+        /* Радар */
+        .radar-container {
             position: relative;
-            border: 1px solid #2c9c8c;
-            box-shadow: 0 0 10px rgba(0,255,200,0.2);
+            display: flex;
+            justify-content: center;
+            margin: 15px 0;
         }
+        
+        .radar {
+            position: relative;
+            width: 280px;
+            height: 280px;
+            border-radius: 50%;
+            background: radial-gradient(circle, #001010, #000a0a);
+            border: 2px solid var(--accent);
+            box-shadow: 0 0 20px rgba(42, 158, 140, 0.3);
+            overflow: hidden;
+        }
+        
+        .radar-sweep {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 50%;
+            height: 50%;
+            background: linear-gradient(135deg, rgba(42, 158, 140, 0.4) 0%, transparent 100%);
+            transform-origin: 0% 100%;
+            animation: sweep 4s linear infinite;
+            border-radius: 0 0 0 100%;
+        }
+        
+        @keyframes sweep {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
         .vacuum-dot {
+            position: absolute;
             width: 12px;
             height: 12px;
             background: #ffaa44;
             border-radius: 50%;
-            position: absolute;
-            transition: all 0.2s linear;
-            box-shadow: 0 0 8px orange;
+            box-shadow: 0 0 12px #ffaa44;
+            transition: all 0.2s ease-out;
+            z-index: 10;
         }
+        
+        .vacuum-dot::after {
+            content: "●";
+            position: absolute;
+            top: -8px;
+            left: -8px;
+            color: #ffaa44;
+            font-size: 24px;
+            opacity: 0.6;
+        }
+        
+        .radar-grid {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: radial-gradient(circle, transparent 0%, transparent 48%, var(--accent) 48%, var(--accent) 50%, transparent 50%),
+                        radial-gradient(circle, transparent 0%, transparent 73%, var(--accent) 73%, var(--accent) 75%, transparent 75%);
+            opacity: 0.3;
+        }
+        
+        /* Таймер */
         .timer {
-            font-size: 3rem;
+            font-size: 4rem;
             text-align: center;
             font-family: monospace;
-            letter-spacing: 5px;
+            letter-spacing: 8px;
+            font-weight: bold;
+            text-shadow: 0 0 20px var(--accent);
+            background: #00000066;
+            padding: 20px;
+            border-radius: 4px;
         }
+        
+        /* Матрица */
         .matrix {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
-            gap: 12px;
+            gap: 10px;
             margin: 20px 0;
         }
+        
         .matrix-btn {
-            background: #1a2a32;
-            border: 1px solid #3a6a7a;
-            padding: 12px;
+            background: #0a151a;
+            border: 1px solid #2a5a6a;
+            padding: 12px 8px;
             text-align: center;
             cursor: pointer;
-            font-size: 0.8rem;
-            transition: 0.1s linear;
+            font-size: 0.75rem;
+            transition: all 0.1s;
+            font-family: monospace;
+            color: #6a9a8a;
         }
+        
+        .matrix-btn:hover {
+            background: #1a3a3a;
+            border-color: var(--accent);
+        }
+        
         .matrix-btn.selected {
             background: #2a6a7a;
             border-color: #8accee;
-            box-shadow: 0 0 6px cyan;
+            color: white;
+            box-shadow: 0 0 12px var(--accent);
         }
-        .logs {
-            background: #0b0e14;
+        
+        button {
+            background: transparent;
+            border: 2px solid var(--accent);
+            color: var(--accent);
+            padding: 10px 20px;
             font-family: monospace;
-            font-size: 0.75rem;
-            height: 150px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            font-weight: bold;
+            letter-spacing: 2px;
+        }
+        
+        button:hover {
+            background: rgba(42, 158, 140, 0.2);
+            box-shadow: 0 0 15px var(--accent);
+        }
+        
+        .logs {
+            background: #000000aa;
+            font-family: monospace;
+            font-size: 0.7rem;
+            height: 140px;
             overflow-y: auto;
-            padding: 8px;
+            padding: 12px;
+            border: 1px solid #2a5a5a;
         }
+        
+        .logs div {
+            padding: 2px 0;
+            border-left: 2px solid var(--accent);
+            padding-left: 8px;
+            margin: 4px 0;
+        }
+        
         .status-text {
-            font-size: 0.8rem;
+            font-size: 0.7rem;
             text-align: center;
-            margin-top: 15px;
+            margin-top: 12px;
+            color: #6a9e8a;
         }
-        @media (max-width: 800px) {
+        
+        @media (max-width: 900px) {
             .dashboard { grid-template-columns: 1fr; }
+            .timer { font-size: 2.5rem; letter-spacing: 4px; }
+            .radar { width: 220px; height: 220px; }
+        }
+        
+        .glitch-text {
+            animation: textGlitch 0.3s infinite;
+        }
+        
+        @keyframes textGlitch {
+            0%, 100% { text-shadow: 2px 0 0 rgba(255,0,0,0.5), -2px 0 0 rgba(0,255,0,0.5); }
+            50% { text-shadow: -2px 0 0 rgba(255,0,0,0.5), 2px 0 0 rgba(0,255,0,0.5); }
         }
     </style>
 </head>
 <body>
-<div class="dashboard">
-    <!-- Пятёрочка (видеонаблюдение) -->
-    <div class="panel">
-        <h2>📹 Пятёрочка (видеонаблюдение)</h2>
-        <div id="cameraFeed" class="camera-view">
-            <!-- Аватары будут подгружаться -->
+    <div class="vhs"></div>
+    <div class="dashboard">
+        <div class="panel">
+            <h2>📹 CCTV-05 | ПЯТЁРОЧКА.ДВОР</h2>
+            <div id="cameraFeed" class="camera-view">
+                <div style="color: #4a7a6a; text-align: center; width: 100%;">ЗАГРУЗКА ПОТОКА...</div>
+            </div>
+            <div class="status-text">⚡ лица заменены на аватары из telegram-чатов</div>
         </div>
-        <div class="status-text">* лица алкашей заменены на аватары из Telegram-чатов</div>
-    </div>
-    
-    <!-- Пылесос (аудио) + радар -->
-    <div class="panel">
-        <h2>🌀 Пылесос (аудио)</h2>
-        <div id="radarContainer" class="radar">
-            <div id="vacuumDot" class="vacuum-dot" style="left: 50%; top: 50%;"></div>
-        </div>
-        <div class="status-text">шум петли: активен | маршрут по схеме квартиры</div>
-        <audio id="vacuumAudio" loop autoplay>
-            <source src="https://www.soundjay.com/misc/sounds/vacuum-cleaner-01.mp3" type="audio/mpeg">
-        </audio>
-        <script>document.getElementById('vacuumAudio').volume = 0.3;</script>
-    </div>
-    
-    <!-- Сессия (таймер) -->
-    <div class="panel">
-        <h2>⏱️ Сессия (обратный отсчёт)</h2>
-        <div id="timerDisplay" class="timer">--:--</div>
-        <div id="timerMsg" class="status-text">ожидание...</div>
-    </div>
-    
-    <!-- ИИ-коммутатор 4x4 -->
-    <div class="panel">
-        <h2>🧠 ИИ-коммутатор</h2>
-        <div class="matrix" id="matrix">
-            <!-- JS заполнит 16 кнопок -->
-        </div>
-        <button id="commutateBtn" style="width:100%; margin-top:10px;">Коммутировать → отправить сессию</button>
-        <div id="commutateResult" class="status-text"></div>
-    </div>
-</div>
-
-<!-- Блок логов -->
-<div style="padding: 0 20px 20px 20px;">
-    <div class="panel">
-        <h2>📟 stdout / технический блог</h2>
-        <div id="logContainer" class="logs"></div>
-    </div>
-</div>
-
-<script>
-    // --- Состояния ---
-    let timerSeconds = 0;
-    let timerInterval = null;
-    let selectedMatrix = Array(16).fill(false);
-    
-    // --- Загрузка таймера с сервера ---
-    async function initTimer() {
-        const res = await fetch('/api/timer');
-        const data = await res.json();
-        timerSeconds = data.seconds;
-        updateTimerDisplay();
-        if (timerInterval) clearInterval(timerInterval);
-        timerInterval = setInterval(() => {
-            if (timerSeconds > 0) {
-                timerSeconds--;
-                updateTimerDisplay();
-                if (timerSeconds === 0) {
-                    clearInterval(timerInterval);
-                    document.getElementById('timerMsg').innerHTML = 'Время остановилось. Можешь курить.';
-                    // Тишина вместо звука
-                    const audio = document.getElementById('vacuumAudio');
-                    if (audio) audio.volume = 0;
-                }
-            }
-        }, 1000);
-    }
-    
-    function updateTimerDisplay() {
-        const mins = Math.floor(timerSeconds / 60);
-        const secs = timerSeconds % 60;
-        document.getElementById('timerDisplay').innerText = `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
-    }
-    
-    // --- Поток пылесоса (SSE) ---
-    function initVacuumStream() {
-        const evtSource = new EventSource('/api/vacuum_stream');
-        evtSource.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            // Переводим координаты (0-10) в проценты для радара
-            const leftPercent = (data.x / 10) * 100;
-            const topPercent = (data.y / 10) * 100;
-            const dot = document.getElementById('vacuumDot');
-            dot.style.left = `calc(${leftPercent}% - 6px)`;
-            dot.style.top = `calc(${topPercent}% - 6px)`;
-        };
-    }
-    
-    // --- Поток камеры: периодически обновляем аватары ---
-    async function updateCamera() {
-        const container = document.getElementById('cameraFeed');
-        // Генерируем 6-8 аватаров (как будто люди во дворе)
-        const count = Math.floor(Math.random() * 5) + 5;
-        let html = '';
-        for(let i=0; i<count; i++) {
-            const res = await fetch('/api/random_avatar');
-            const avatar = await res.json();
-            html += `
-                <div class="avatar-card">
-                    <img src="${avatar.avatar}" alt="avatar">
-                    <div>${avatar.name}</div>
-                </div>
-            `;
-        }
-        container.innerHTML = html;
-    }
-    
-    // --- ИИ-коммутатор: создать матрицу ---
-    function buildMatrix() {
-        const container = document.getElementById('matrix');
-        container.innerHTML = '';
-        for(let i=0; i<16; i++) {
-            const btn = document.createElement('div');
-            btn.className = 'matrix-btn';
-            btn.innerText = `вх${Math.floor(i/4)+1}/${(i%4)+1}`;
-            btn.onclick = () => {
-                selectedMatrix[i] = !selectedMatrix[i];
-                if(selectedMatrix[i]) btn.classList.add('selected');
-                else btn.classList.remove('selected');
-            };
-            container.appendChild(btn);
-        }
-    }
-    
-    async function sendCommutation() {
-        const inputs = [];
-        for(let i=0; i<16; i++) {
-            if(selectedMatrix[i]) inputs.push(i);
-        }
-        const res = await fetch('/api/commutate', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ inputs: inputs })
-        });
-        const data = await res.json();
-        document.getElementById('commutateResult').innerText = data.message;
-        // сбросить выделение
-        selectedMatrix.fill(false);
-        document.querySelectorAll('.matrix-btn').forEach(btn => btn.classList.remove('selected'));
-    }
-    
-    // --- Логи ---
-    async function fetchLogs() {
-        const res = await fetch('/api/logs');
-        const logs = await res.json();
-        const container = document.getElementById('logContainer');
-        container.innerHTML = logs.map(l => `<div>${l}</div>`).join('');
-    }
-    
-    // --- Обновление погоды (цветовая гамма через CSS уже применена из шаблона, но динамически проверим)---
-    async function refreshWeatherUI() {
-        // можно ничего не делать, бекенд уже передал rain_mode
-    }
-    
-    // --- Сброс таймера при обновлении страницы (поведение) ---
-    window.onload = () => {
-        initTimer();
-        initVacuumStream();
-        buildMatrix();
-        updateCamera();
-        fetchLogs();
-        setInterval(updateCamera, 15000); // новые лица каждые 15 сек
-        setInterval(fetchLogs, 10000);
-        document.getElementById('commutateBtn').onclick = sendCommutation;
         
-        // Принудительно обновляем таймер при каждом фокусе? нет, оставим как есть
-        // Если пользователь обновит страницу, таймер сбросится (новый запрос /api/timer)
-    };
+        <div class="panel">
+            <h2>🌀 ROBOROCK S6 | ТЕЛЕМЕТРИЯ</h2>
+            <div class="radar-container">
+                <div class="radar">
+                    <div class="radar-sweep"></div>
+                    <div class="radar-grid"></div>
+                    <div id="vacuumDot" class="vacuum-dot" style="left: 50%; top: 50%;"></div>
+                </div>
+            </div>
+            <div class="status-text">🔊 АУДИОПЕТЛЯ: ШУМ РАБОТЫ | МАРШРУТ ПО СХЕМЕ КВАРТИРЫ</div>
+            <audio id="vacuumAudio" loop>
+                <source src="https://www.soundjay.com/misc/sounds/vacuum-cleaner-01.mp3" type="audio/mpeg">
+            </audio>
+        </div>
+        
+        <div class="panel">
+            <h2>⏱️ SESSION::TIMER | ЭКЗАМЕН</h2>
+            <div id="timerDisplay" class="timer">00:00</div>
+            <div id="timerMsg" class="status-text">[ ОЖИДАНИЕ СТАРТА ]</div>
+        </div>
+        
+        <div class="panel">
+            <h2>🧠 AI-MATRIX | КОММУТАТОР 4x4</h2>
+            <div class="matrix" id="matrix"></div>
+            <button id="commutateBtn">▶ КОММУТИРОВАТЬ</button>
+            <div id="commutateResult" class="status-text"></div>
+        </div>
+    </div>
     
-    // Дополнительно: если таймер закончился, ничего не делаем, просто тишина.
-</script>
+    <div style="margin-top: 20px; max-width: 1600px; margin-left: auto; margin-right: auto;">
+        <div class="panel">
+            <h2>📟 SYSTEM::LOGS (STDOUT)</h2>
+            <div id="logContainer" class="logs">
+                <div>[---] инициализация хаба...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let timerSeconds = 0;
+        let timerInterval = null;
+        let selectedMatrix = Array(16).fill(false);
+        
+        async function initTimer() {
+            const res = await fetch('/api/timer');
+            const data = await res.json();
+            timerSeconds = data.seconds;
+            updateTimerDisplay();
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if (timerSeconds > 0) {
+                    timerSeconds--;
+                    updateTimerDisplay();
+                    if (timerSeconds === 0) {
+                        clearInterval(timerInterval);
+                        document.getElementById('timerMsg').innerHTML = '⏸️ ВРЕМЯ ОСТАНОВИЛОСЬ. МОЖЕШЬ КУРИТЬ.';
+                        const audio = document.getElementById('vacuumAudio');
+                        if (audio) audio.volume = 0;
+                    }
+                }
+            }, 1000);
+        }
+        
+        function updateTimerDisplay() {
+            const mins = Math.floor(timerSeconds / 60);
+            const secs = timerSeconds % 60;
+            document.getElementById('timerDisplay').innerText = `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
+        }
+        
+        function initVacuumStream() {
+            const evtSource = new EventSource('/api/vacuum_stream');
+            evtSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                const leftPercent = (data.x / 10) * 100;
+                const topPercent = (data.y / 10) * 100;
+                const dot = document.getElementById('vacuumDot');
+                dot.style.left = `calc(${leftPercent}% - 6px)`;
+                dot.style.top = `calc(${topPercent}% - 6px)`;
+            };
+            
+            const audio = document.getElementById('vacuumAudio');
+            audio.volume = 0.25;
+            audio.play().catch(e => console.log('audio autoplay blocked'));
+        }
+        
+        async function updateCamera() {
+            const container = document.getElementById('cameraFeed');
+            const count = Math.floor(Math.random() * 8) + 6;
+            let html = '';
+            for(let i = 0; i < count; i++) {
+                const res = await fetch('/api/random_avatar');
+                const avatar = await res.json();
+                html += `
+                    <div class="avatar-card" onclick="alert('${avatar.name} | уровень опьянения: ${Math.floor(Math.random() * 100)}%')">
+                        <img src="${avatar.avatar}" alt="avatar">
+                        <div>${avatar.name}</div>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        }
+        
+        function buildMatrix() {
+            const container = document.getElementById('matrix');
+            container.innerHTML = '';
+            const labels = ['ФОТО', 'TEXT', 'ДОЖДЬ', 'CCTV'];
+            for(let i = 0; i < 16; i++) {
+                const btn = document.createElement('div');
+                const row = Math.floor(i / 4);
+                const col = i % 4;
+                btn.className = 'matrix-btn';
+                btn.innerText = `${labels[row]}:${col+1}`;
+                btn.onclick = () => {
+                    selectedMatrix[i] = !selectedMatrix[i];
+                    if(selectedMatrix[i]) btn.classList.add('selected');
+                    else btn.classList.remove('selected');
+                };
+                container.appendChild(btn);
+            }
+        }
+        
+        async function sendCommutation() {
+            const inputs = [];
+            for(let i = 0; i < 16; i++) {
+                if(selectedMatrix[i]) inputs.push(i);
+            }
+            const res = await fetch('/api/commutate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ inputs: inputs })
+            });
+            const data = await res.json();
+            document.getElementById('commutateResult').innerHTML = data.message.replace(/\\n/g, '<br>');
+            selectedMatrix.fill(false);
+            document.querySelectorAll('.matrix-btn').forEach(btn => btn.classList.remove('selected'));
+            
+            setTimeout(() => {
+                document.getElementById('commutateResult').innerHTML = '';
+            }, 3000);
+        }
+        
+        async function fetchLogs() {
+            const res = await fetch('/api/logs');
+            const logs = await res.json();
+            const container = document.getElementById('logContainer');
+            container.innerHTML = logs.map(l => `<div>${l}</div>`).join('');
+        }
+        
+        window.onload = () => {
+            initTimer();
+            initVacuumStream();
+            buildMatrix();
+            updateCamera();
+            fetchLogs();
+            setInterval(updateCamera, 18000);
+            setInterval(fetchLogs, 10000);
+            document.getElementById('commutateBtn').onclick = sendCommutation;
+        };
+        
+        window.onbeforeunload = () => {
+            if(timerSeconds > 0) {
+                return "Таймер будет сброшен. Время продолжится?";
+            }
+        };
+    </script>
 </body>
 </html>
         """)
-    
-    # Создаем пустые файлы для хранения данных
-    if not os.path.exists("user_data/apartment_map.json"):
-        with open("user_data/apartment_map.json", "w") as f:
-            json.dump(apartment_map, f)
 
 create_templates()
 
-# --- Запуск ---
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
