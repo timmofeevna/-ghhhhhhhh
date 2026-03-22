@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <meta name="description" content="Актуальный статус работы Московского метро: режим работы, закрытые станции и выходы, расписание поездов">
+    <meta name="keywords" content="метро москвы, статус метро, работа метро, закрытые станции, московский метрополитен">
+    <meta name="author" content="Metro Status">
+    <title>🚇 Московское метро | Статус работы онлайн</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+            background: linear-gradient(135deg, #0a0f1a 0%, #0f172a 100%);
+            color: #e2e8f0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        /* Хедер */
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+            padding: 20px;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 24px;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+        
+        h1 {
+            font-size: 1.8rem;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .time-badge {
+            font-size: 0.9rem;
+            color: #94a3b8;
+            margin-top: 8px;
+        }
+        
+        /* Статусная карточка */
+        .status-card {
+            background: rgba(15, 23, 42, 0.9);
+            backdrop-filter: blur(10px);
+            border-radius: 24px;
+            padding: 24px;
+            margin-bottom: 20px;
+            text-align: center;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+        
+        .status-icon {
+            font-size: 4rem;
+            margin-bottom: 12px;
+        }
+        
+        .status-message {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        
+        .status-working { color: #22c55e; }
+        .status-preparing { color: #eab308; }
+        .status-closed { color: #ef4444; }
+        
+        .work-time {
+            font-size: 0.9rem;
+            color: #94a3b8;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(59, 130, 246, 0.2);
+        }
+        
+        /* Секции */
+        .section {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(5px);
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+        
+        .section h2 {
+            font-size: 1.2rem;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(59, 130, 246, 0.3);
+        }
+        
+        /* Список линий */
+        .lines-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 12px;
+        }
+        
+        .line-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            border-left: 4px solid;
+        }
+        
+        .line-emoji {
+            font-size: 1.3rem;
+        }
+        
+        .line-name {
+            flex: 1;
+            font-size: 0.9rem;
+        }
+        
+        .line-badge {
+            font-size: 0.7rem;
+            background: #22c55e20;
+            padding: 2px 8px;
+            border-radius: 20px;
+            color: #22c55e;
+        }
+        
+        /* Предупреждения */
+        .warning {
+            background: #f59e0b20;
+            border-left: 4px solid #f59e0b;
+            padding: 12px 16px;
+            border-radius: 12px;
+            margin-bottom: 16px;
+        }
+        
+        .warning h3 {
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+            color: #fbbf24;
+        }
+        
+        .warning p {
+            font-size: 0.85rem;
+            color: #e2e8f0;
+        }
+        
+        .stations-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        .station-tag {
+            background: #ef444420;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            color: #f87171;
+        }
+        
+        /* Закрытые выходы */
+        .closed-exits {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .exit-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            font-size: 0.85rem;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .exit-name {
+            font-weight: 500;
+        }
+        
+        .exit-info {
+            color: #f87171;
+            font-size: 0.75rem;
+        }
+        
+        .exit-until {
+            color: #94a3b8;
+            font-size: 0.7rem;
+        }
+        
+        /* Расписание */
+        .schedule-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(59, 130, 246, 0.1);
+            font-size: 0.9rem;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .interval-badge {
+            text-align: center;
+            padding: 12px;
+            background: #22c55e10;
+            border-radius: 12px;
+            margin-top: 12px;
+            font-size: 0.9rem;
+        }
+        
+        /* Футер */
+        .footer {
+            text-align: center;
+            font-size: 0.7rem;
+            color: #475569;
+            margin-top: 30px;
+            padding: 20px;
+        }
+        
+        .refresh-btn {
+            background: #3b82f6;
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 40px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            margin-top: 12px;
+            transition: all 0.2s;
+        }
+        
+        .refresh-btn:hover {
+            background: #2563eb;
+            transform: scale(1.02);
+        }
+        
+        .repo-link {
+            margin-top: 15px;
+            font-size: 0.7rem;
+        }
+        
+        .repo-link a {
+            color: #60a5fa;
+            text-decoration: none;
+        }
+        
+        .repo-link a:hover {
+            text-decoration: underline;
+        }
+        
+        @media (max-width: 600px) {
+            body { padding: 12px; }
+            .status-message { font-size: 1.2rem; }
+            h1 { font-size: 1.4rem; }
+            .lines-grid { grid-template-columns: 1fr; }
+            .exit-item { flex-direction: column; align-items: flex-start; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>
+                <span>🚇</span>
+                <span>Московский метрополитен</span>
+                <span>🚇</span>
+            </h1>
+            <div class="time-badge" id="currentDateTime">
+                Загрузка...
+            </div>
+        </div>
+        
+        <!-- Основной статус -->
+        <div class="status-card">
+            <div class="status-icon" id="statusIcon">🚇✅</div>
+            <div class="status-message" id="statusMessage">
+                Определение статуса...
+            </div>
+            <div class="work-time">
+                ⏰ Режим работы: ежедневно с 05:30 до 01:00
+            </div>
+            <button class="refresh-btn" onclick="location.reload()">🔄 Обновить статус</button>
+        </div>
+        
+        <!-- Закрытый участок Сокольнической линии -->
+        <div id="closedSectionContainer"></div>
+        
+        <!-- Закрытые выходы -->
+        <div id="closedExitsContainer"></div>
+        
+        <!-- Расписание -->
+        <div id="scheduleContainer"></div>
+        
+        <!-- Все линии метро -->
+        <div class="section">
+            <h2>📊 Линии метро</h2>
+            <div class="lines-grid" id="linesGrid">
+                <!-- Загружается через JS -->
+            </div>
+        </div>
+        
+        <!-- Полезная информация -->
+        <div class="section">
+            <h2>ℹ️ Полезная информация</h2>
+            <div class="schedule-row">
+                <span>💰 Тарифы 2026:</span>
+                <span>71₽ (биометрия) / 75₽ (Тройка) / 83₽ (банковская карта)</span>
+            </div>
+            <div class="schedule-row">
+                <span>🆘 Справка:</span>
+                <span>+7 (495) 539-54-54 или 3210 с мобильного</span>
+            </div>
+            <div class="schedule-row">
+                <span>📱 Приложение:</span>
+                <span>«Метро Москвы» — маршруты, пополнение Тройки, новости</span>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <div id="footerDate"></div>
+            🚇 Данные основаны на официальной информации Московского метрополитена<br>
+            <div class="repo-link">
+                📦 <a href="https://github.com/yourusername/metro-status" target="_blank">GitHub репозиторий</a>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Данные о линиях метро
+        const LINES = {
+            "1": {"name": "Сокольническая", "color": "#E31E24", "emoji": "🔴"},
+            "2": {"name": "Замоскворецкая", "color": "#3A9B43", "emoji": "🟢"},
+            "3": {"name": "Арбатско-Покровская", "color": "#1C69B4", "emoji": "🔵"},
+            "4": {"name": "Филёвская", "color": "#AACF53", "emoji": "🟡"},
+            "5": {"name": "Кольцевая", "color": "#915A2C", "emoji": "🟤"},
+            "6": {"name": "Калужско-Рижская", "color": "#F7941E", "emoji": "🟠"},
+            "7": {"name": "Таганско-Краснопресненская", "color": "#7C2D7D", "emoji": "🟣"},
+            "8": {"name": "Калининская", "color": "#F4B236", "emoji": "🟡"},
+            "9": {"name": "Серпуховско-Тимирязевская", "color": "#9B9B9B", "emoji": "⚪"},
+            "10": {"name": "Люблинско-Дмитровская", "color": "#AACF53", "emoji": "🟢"},
+            "11": {"name": "Большая кольцевая", "color": "#A87B3E", "emoji": "🟠"},
+            "12": {"name": "Бутовская", "color": "#1C69B4", "emoji": "🔵"},
+            "14": {"name": "МЦК", "color": "#F7941E", "emoji": "🟠"},
+            "15": {"name": "Некрасовская", "color": "#AACF53", "emoji": "🟢"}
+        };
+        
+        // Данные о закрытых выходах (актуальные на 2026 год)
+        const CLOSED_EXITS = [
+            {"name": "Лубянка", "exits": "выходы №2–5", "until": "01.06.2026"},
+            {"name": "Каширская", "exits": "выходы №3–4", "until": "09.09.2026"},
+            {"name": "Курская", "exits": "выход №1", "until": "05.09.2026"},
+            {"name": "Славянский бульвар", "exits": "выход №3", "until": "неопределённый срок"},
+            {"name": "Киевская", "exits": "выход №1", "until": "01.09.2026"},
+            {"name": "Китай-город", "exits": "выход №3", "until": "неопределённый срок"},
+            {"name": "Говорово", "exits": "выходы №3–4", "until": "12.08.2026"},
+            {"name": "Нагатинская", "exits": "выход №1", "until": "31.12.2026"},
+            {"name": "Пражская", "exits": "выходы №1–12", "until": "неопределённый срок"},
+            {"name": "Нижегородская", "exits": "выходы №1–3", "until": "25.06.2026"},
+            {"name": "Черкизовская", "exits": "выход №1", "until": "31.07.2026"},
+            {"name": "Охотный Ряд", "exits": "выходы №8–9", "until": "05.09.2026"},
+            {"name": "Павелецкая", "exits": "выход №3", "until": "27.06.2026"},
+            {"name": "Автозаводская", "exits": "выход №1", "until": "31.07.2026"},
+            {"name": "Бауманская", "exits": "выход №1", "until": "29.08.2026"},
+            {"name": "Молодёжная", "exits": "выход №2", "until": "30.05.2026"},
+            {"name": "ВДНХ", "exits": "выходы №2–5", "until": "31.07.2026"},
+            {"name": "Пушкинская", "exits": "выходы №1–4", "until": "05.08.2026"},
+            {"name": "Раменки", "exits": "выходы №5–7", "until": "02.09.2026"},
+            {"name": "Владыкино", "exits": "выход №2", "until": "31.07.2026"},
+            {"name": "Трубная", "exits": "выход №2", "until": "27.06.2026"},
+            {"name": "Римская", "exits": "выходы №1–4", "until": "11.06.2026"}
+        ];
+        
+        // Закрытый участок Сокольнической линии
+        const CLOSED_SECTION = {
+            "line": "Сокольническая",
+            "stations": ["Проспект Вернадского", "Юго-Западная", "Тропарёво", "Румянцево", "Саларьево", "Филатов Луг", "Прокшино", "Ольховая", "Коммунарка"],
+            "until": "20 июля 2026"
+        };
+        
+        // Функция определения статуса метро на основе времени
+        function getMetroStatus() {
+            const now = new Date();
+            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+            
+            // Проверяем время работы: 5:30 – 1:00
+            if (currentHour >= 5 && currentHour < 24) {
+                if (currentHour === 5 && currentMinute < 30) {
+                    return {
+                        type: "preparing",
+                        message: "🌅 Метро готовится к открытию (первые поезда с 5:28)",
+                        icon: "🌅⏳",
+                        isOpen: false
+                    };
+                } else {
+                    return {
+                        type: "working",
+                        message: "🚇 Метро работает в штатном режиме",
+                        icon: "🚇✅",
+                        isOpen: true
+                    };
+                }
+            } else if (currentHour >= 0 && currentHour < 5) {
+                if (currentHour === 0 && currentMinute < 30) {
+                    return {
+                        type: "working",
+                        message: "🌙 Метро работает (последние поезда до ~1:30)",
+                        icon: "🌙🚇",
+                        isOpen: true
+                    };
+                } else {
+                    return {
+                        type: "closed",
+                        message: "💤 Метро закрыто на ночной перерыв (открытие в 5:30)",
+                        icon: "💤❌",
+                        isOpen: false
+                    };
+                }
+            } else {
+                return {
+                    type: "working",
+                    message: "🚇 Метро работает",
+                    icon: "🚇✅",
+                    isOpen: true
+                };
+            }
+        }
+        
+        // Определение интервалов движения
+        function getInterval() {
+            const now = new Date();
+            const hour = now.getHours();
+            
+            if (hour >= 7 && hour <= 10 || hour >= 16 && hour <= 19) {
+                return "90–100 секунд (час пик)";
+            } else if (hour >= 22 || hour < 6) {
+                return "6–10 минут";
+            } else {
+                return "2.5–4 минуты";
+            }
+        }
+        
+        // Форматирование даты и времени
+        function updateDateTime() {
+            const now = new Date();
+            const options = { 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            };
+            const formattedDate = now.toLocaleDateString('ru-RU', options);
+            document.getElementById('currentDateTime').innerHTML = formattedDate + ' MSK';
+            document.getElementById('footerDate').innerHTML = '📅 ' + now.toLocaleDateString('ru-RU');
+        }
+        
+        // Рендер линий метро
+        function renderLines() {
+            const container = document.getElementById('linesGrid');
+            let html = '';
+            
+            for (const [id, line] of Object.entries(LINES)) {
+                html += `
+                    <div class="line-item" style="border-left-color: ${line.color}">
+                        <span class="line-emoji">${line.emoji}</span>
+                        <span class="line-name">${line.name}</span>
+                        <span class="line-badge">✓ работает</span>
+                    </div>
+                `;
+            }
+            
+            container.innerHTML = html;
+        }
+        
+        // Рендер закрытого участка
+        function renderClosedSection() {
+            const now = new Date();
+            const closeDate = new Date(2026, 6, 20); // 20 июля 2026
+            const isStillClosed = now <= closeDate;
+            
+            if (isStillClosed) {
+                const html = `
+                    <div class="warning">
+                        <h3>⚠️ ВНИМАНИЕ: ЗАКРЫТЫЙ УЧАСТОК</h3>
+                        <p><strong>${CLOSED_SECTION.line} линия</strong> закрыта на участке до ${CLOSED_SECTION.until}</p>
+                        <div class="stations-list">
+                            ${CLOSED_SECTION.stations.map(station => `<span class="station-tag">${station}</span>`).join('')}
+                        </div>
+                        <p style="margin-top: 10px; font-size: 0.8rem;">🚌 Для пассажиров организованы компенсационные автобусы</p>
+                    </div>
+                `;
+                document.getElementById('closedSectionContainer').innerHTML = html;
+            }
+        }
+        
+        // Рендер закрытых выходов
+        function renderClosedExits() {
+            const now = new Date();
+            const currentDate = now.toISOString().split('T')[0];
+            
+            // Фильтруем актуальные закрытия
+            const activeExits = CLOSED_EXITS.filter(exit => {
+                if (exit.until === "неопределённый срок") return true;
+                const [day, month, year] = exit.until.split('.');
+                const untilDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+                return now <= untilDate;
+            });
+            
+            if (activeExits.length > 0) {
+                const html = `
+                    <div class="section">
+                        <h2>🚪 Закрытые выходы и вестибюли</h2>
+                        <div class="closed-exits">
+                            ${activeExits.slice(0, 8).map(exit => `
+                                <div class="exit-item">
+                                    <span class="exit-name">${exit.name}</span>
+                                    <span class="exit-info">${exit.exits}</span>
+                                    <span class="exit-until">до ${exit.until}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        ${activeExits.length > 8 ? `<p style="font-size: 0.7rem; color: #64748b; margin-top: 12px; text-align: center;">+ ещё ${activeExits.length - 8} станций с ограничениями</p>` : ''}
+                    </div>
+                `;
+                document.getElementById('closedExitsContainer').innerHTML = html;
+            }
+        }
+        
+        // Рендер расписания
+        function renderSchedule() {
+            const now = new Date();
+            const hour = now.getHours();
+            const minute = now.getMinutes();
+            
+            let firstTrainsHtml = '';
+            let lastTrainsHtml = '';
+            
+            // Первые поезда
+            if (hour < 5 || (hour === 5 && minute < 30)) {
+                firstTrainsHtml = `
+                    <div class="schedule-row">
+                        <span>🌅 Первые поезда (отправление):</span>
+                        <span style="color: #22c55e">05:28 → Речной вокзал (Замоскворецкая)</span>
+                    </div>
+                    <div class="schedule-row">
+                        <span></span>
+                        <span style="color: #22c55e">05:45 → Алма-Атинская (Замоскворецкая)</span>
+                    </div>
+                `;
+            } else {
+                firstTrainsHtml = `
+                    <div class="schedule-row">
+                        <span>🌅 Первые поезда:</span>
+                        <span style="color: #22c55e">Поезда уже ходят с 05:30</span>
+                    </div>
+                `;
+            }
+            
+            // Последние поезда
+            if (hour >= 22 || (hour === 0 && minute < 30)) {
+                lastTrainsHtml = `
+                    <div class="schedule-row">
+                        <span>🌙 Последние поезда:</span>
+                        <span style="color: #f97316">01:03 → Алма-Атинская → центр</span>
+                    </div>
+                    <div class="schedule-row">
+                        <span>🚪 Последний вход:</span>
+                        <span style="color: #ef4444">~00:55</span>
+                    </div>
+                `;
+            }
+            
+            const interval = getInterval();
+            
+            const html = `
+                <div class="section">
+                    <h2>⏱️ Расписание</h2>
+                    ${firstTrainsHtml}
+                    ${lastTrainsHtml}
+                    <div class="interval-badge">
+                        🚆 Интервал движения: <strong>${interval}</strong>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('scheduleContainer').innerHTML = html;
+        }
+        
+        // Обновление статуса
+        function updateStatus() {
+            const status = getMetroStatus();
+            document.getElementById('statusIcon').innerHTML = status.icon;
+            document.getElementById('statusMessage').innerHTML = status.message;
+            document.getElementById('statusMessage').className = `status-message status-${status.type}`;
+        }
+        
+        // Инициализация
+        function init() {
+            updateDateTime();
+            updateStatus();
+            renderLines();
+            renderClosedSection();
+            renderClosedExits();
+            renderSchedule();
+            
+            // Обновляем дату и время каждую секунду
+            setInterval(updateDateTime, 1000);
+            // Обновляем статус каждую минуту
+            setInterval(updateStatus, 60000);
+            // Обновляем расписание каждые 5 минут
+            setInterval(renderSchedule, 300000);
+        }
+        
+        // Запуск
+        init();
+    </script>
+</body>
+</html>
